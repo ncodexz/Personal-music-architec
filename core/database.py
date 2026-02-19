@@ -2,7 +2,7 @@ import sqlite3
 
 
 def get_connection(db_path: str = "music_agent.db"):
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 

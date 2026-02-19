@@ -1,45 +1,86 @@
 import requests
 
 
-def get_tracks(conn, artist=None, order_by="added_at DESC", limit=None):
-    cursor = conn.cursor()
+# Playlist Discovery
 
-    query = """
-    SELECT t.track_id, t.name, t.added_at
-    FROM tracks t
-    JOIN track_artists ta ON t.track_id = ta.track_id
-    JOIN artists a ON ta.artist_id = a.artist_id
+
+def get_current_user_playlists(sp, limit=50, offset=0):
     """
-
-    conditions = []
-    params = []
-
-    if artist:
-        conditions.append("LOWER(a.name) = LOWER(?)")
-        params.append(artist)
-
-    if conditions:
-        query += " WHERE " + " AND ".join(conditions)
-
-    query += f" ORDER BY t.{order_by}"
-
-    if limit:
-        query += " LIMIT ?"
-        params.append(limit)
-
-    cursor.execute(query, params)
-    return cursor.fetchall()
+    Retrieve playlists owned or followed by the current user.
+    """
+    return sp.current_user_playlists(limit=limit, offset=offset)
 
 
-def create_playlist(sp, name, public=False):
-    playlist = sp._post("me/playlists", payload={
-        "name": name,
-        "public": public
-    })
+def get_playlist_id_by_name(sp, playlist_name: str):
+    """
+    Retrieve playlist ID by playlist name.
+    Returns None if not found.
+    """
+    playlists = sp.current_user_playlists(limit=50)
+
+    for item in playlists["items"]:
+        if item["name"].lower() == playlist_name.lower():
+            return item["id"]
+
+    return None
+
+
+def get_latest_playlist(sp):
+    """
+    Retrieve the most recently created playlist.
+    Assumes playlists are returned in descending order.
+    """
+    playlists = sp.current_user_playlists(limit=1)
+
+    items = playlists.get("items", [])
+    if not items:
+        return None
+
+    return items[0]
+
+
+# Playlist Creation
+
+
+def create_playlist(sp, name: str, public: bool = False):
+    """
+    Create a new playlist and return its ID.
+    Uses official /me/playlists endpoint.
+    """
+    playlist = sp._post(
+        "me/playlists",
+        payload={
+            "name": name,
+            "public": public
+        }
+    )
+
     return playlist["id"]
 
 
-def add_tracks_to_playlist(sp, playlist_id, track_ids):
+# Playlist Modification
+
+
+def update_playlist_details(sp, playlist_id: str, name=None, public=None):
+    """
+    Update playlist details such as name or public state.
+    """
+    payload = {}
+
+    if name is not None:
+        payload["name"] = name
+
+    if public is not None:
+        payload["public"] = public
+
+    if payload:
+        sp.playlist_change_details(playlist_id, **payload)
+
+
+def add_tracks_to_playlist(sp, playlist_id: str, track_ids: list):
+    """
+    Add track IDs to a playlist using official /items endpoint.
+    """
     track_uris = [f"spotify:track:{tid}" for tid in track_ids]
 
     for i in range(0, len(track_uris), 100):
@@ -52,6 +93,9 @@ def add_tracks_to_playlist(sp, playlist_id, track_ids):
 
 
 def remove_tracks_from_playlist(sp, playlist_id, track_ids):
+    """
+    Remove track IDs from a playlist.
+    """
     token = sp.auth_manager.get_access_token(as_dict=False)
 
     url = f"https://api.spotify.com/v1/playlists/{playlist_id}/items"
@@ -77,85 +121,34 @@ def remove_tracks_from_playlist(sp, playlist_id, track_ids):
     return response.json()
 
 
-def replace_playlist_tracks(sp, playlist_id, track_ids):
+def replace_playlist_tracks(sp, playlist_id: str, track_ids: list):
+    """
+    Replace all tracks in a playlist.
+    """
     track_uris = [f"spotify:track:{tid}" for tid in track_ids]
 
-    sp._put(
-        f"playlists/{playlist_id}/items",
-        payload={
-            "uris": track_uris
-        }
+    sp.playlist_replace_items(
+        playlist_id,
+        track_uris
     )
 
 
-def update_playlist_details(sp, playlist_id, name=None, public=None):
-    payload = {}
-
-    if name is not None:
-        payload["name"] = name
-
-    if public is not None:
-        payload["public"] = public
-
-    sp._put(f"playlists/{playlist_id}", payload=payload)
+# Playlist Retrieval
 
 
-def unfollow_playlist(sp, playlist_id):
-    sp.current_user_unfollow_playlist(playlist_id)
-
-
-def get_playlist(sp, playlist_id):
+def get_playlist(sp, playlist_id: str):
     """
-    Retrieve full details of a playlist.
+    Retrieve full playlist details.
     """
     return sp.playlist(playlist_id)
 
 
-def get_playlist_items(sp, playlist_id, limit=100, offset=0):
+def get_playlist_items(sp, playlist_id: str, limit=100, offset=0):
     """
-    Retrieve items from a playlist.
+    Retrieve playlist items.
     """
     return sp.playlist_items(
         playlist_id,
         limit=limit,
         offset=offset
     )
-
-
-def get_current_user_playlists(sp, limit=50, offset=0):
-    """
-    Retrieve playlists owned or followed by the current user.
-    """
-    return sp.current_user_playlists(
-        limit=limit,
-        offset=offset
-    )
-
-
-
-def get_playlist_items(sp, playlist_id, limit=100, offset=0):
-    """
-    Retrieve playlist items using the official /items endpoint.
-    Avoids deprecated /tracks endpoint used internally by older Spotipy versions.
-    """
-    token = sp.auth_manager.get_access_token(as_dict=False)
-
-    url = f"https://api.spotify.com/v1/playlists/{playlist_id}/items"
-
-    headers = {
-        "Authorization": f"Bearer {token}"
-    }
-
-    params = {
-        "limit": limit,
-        "offset": offset
-    }
-
-    response = requests.get(url, headers=headers, params=params)
-
-    if response.status_code != 200:
-        raise RuntimeError(
-            f"Failed to retrieve playlist items. Status: {response.status_code}, Response: {response.text}"
-        )
-
-    return response.json()
