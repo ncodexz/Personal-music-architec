@@ -10,9 +10,7 @@ def get_connection(db_path: str = "music_agent.db"):
 def create_tables(conn):
     cursor = conn.cursor()
 
-    # =========================
     # Core Domain
-    # =========================
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS tracks (
@@ -61,9 +59,7 @@ def create_tables(conn):
     );
     """)
 
-    # =========================
     # Playlists Domain
-    # =========================
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS playlists (
@@ -91,9 +87,7 @@ def create_tables(conn):
     );
     """)
 
-    # =========================
     # Saved Albums
-    # =========================
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS saved_albums (
@@ -103,9 +97,7 @@ def create_tables(conn):
     );
     """)
 
-    # =========================
     # Audio Features
-    # =========================
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS track_audio_features (
@@ -122,9 +114,7 @@ def create_tables(conn):
     );
     """)
 
-    # =========================
     # Metrics Domain
-    # =========================
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS track_metrics (
@@ -151,23 +141,22 @@ def create_tables(conn):
     );
     """)
 
-    # =========================
     # Behavioral Domain
-    # =========================
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS play_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         track_id TEXT NOT NULL,
         played_at TEXT NOT NULL,
         context_type TEXT,
         context_id TEXT,
+        source TEXT NOT NULL,
+        weight REAL DEFAULT 1.0,
         FOREIGN KEY (track_id) REFERENCES tracks(track_id) ON DELETE CASCADE
     );
     """)
 
-    # =========================
-    # Indexes (Read Optimization)
-    # =========================
+    # Indexes
 
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_added_at ON tracks(added_at);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_track_artists_artist ON track_artists(artist_id);")
@@ -177,7 +166,9 @@ def create_tables(conn):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_audio_features_energy ON track_audio_features(energy);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_audio_features_valence ON track_audio_features(valence);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_track_metrics_engagement ON track_metrics(engagement_score);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_play_history_track ON play_history(track_id);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_play_history_played_at ON play_history(played_at);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_play_history_source ON play_history(source);")
 
     conn.commit()
 

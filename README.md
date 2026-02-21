@@ -1,214 +1,141 @@
-Personal Music Architect
-Playlist Module – Operational Documentation
-1. Architectural Context
-The Playlist module belongs to Phase 1 (Structural Layer) of the project.
-This phase does not include:
-AI
-Embeddings
-RAG
-Semantic reasoning
-Agent orchestration logic
-This phase provides:
-Persistent SQLite storage
-Incremental synchronization from Spotify
-Atomic playlist manipulation tools
-Clean separation between persistence, ingestion, and actions
-The playlist module contains atomic tools only.
-No complex logic.
-No interpretation.
-No emotional reasoning.
-All orchestration will live in the future Agent layer.
-2. Required Initialization Before Using Playlist Functions
-Before calling any playlist function, the following must be initialized in the notebook:
-2.1 Project Root
-The notebook must run from the project root:
-import os
-import sys
-
-PROJECT_ROOT = os.path.abspath("..")
-if PROJECT_ROOT not in sys.path:
-    sys.path.append(PROJECT_ROOT)
-2.2 Spotify Authentication
-import spotipy
-from spotipy.oauth2 import SpotifyOAuth
-
-SCOPE = (
-    "playlist-read-private "
-    "playlist-modify-public "
-    "playlist-modify-private "
-    "user-library-read"
-)
-
-sp = spotipy.Spotify(
-    auth_manager=SpotifyOAuth(
-        scope=SCOPE,
-        cache_path=".spotify_cache"
-    )
-)
-Important:
-Token must include playlist modification scopes.
-Cache file is stored in project root.
-If cache is deleted, authentication flow will restart.
-2.3 Database Initialization
-from core.database import get_connection, create_tables
-
-conn = get_connection("music_agent.db")
-create_tables(conn)
-If this is a fresh setup, you must also sync:
-from core.ingestion import sync_new_tracks
-from core.database import get_latest_added_at
-
-sync_new_tracks(sp, conn, get_latest_added_at)
-3. Playlist Module Overview
-File:
-core/playlists.py
-The module provides:
-Local database track retrieval
-Playlist creation
-Playlist update
-Playlist item addition
-Playlist item removal
-Playlist replacement
-Playlist deletion
-Playlist item retrieval
-All tools are atomic and deterministic.
-4. Database Query Tool
-get_tracks(conn, artist=None, order_by="added_at DESC", limit=None)
-Purpose:
-Retrieve tracks from local SQLite database.
-Example:
-tracks = get_tracks(conn, artist="Eminem")
-Returns:
-[
-    (track_id, name, added_at),
-    ...
-]
-Notes:
-Filtering is case-insensitive.
-Sorting is SQL-based.
-Does not call Spotify API.
-Operates only on local DB.
-5. Playlist Creation
-create_playlist(sp, name, public=False)
-Creates a new playlist.
-Example:
-playlist_id = create_playlist(sp, "Eminem - 17", public=True)
-Returns:
-playlist_id (string)
-Uses endpoint:
-POST /me/playlists
-Confirmed working.
-6. Add Tracks to Playlist
-add_tracks_to_playlist(sp, playlist_id, track_ids)
-Adds tracks in batches of 100.
-Example:
-add_tracks_to_playlist(sp, playlist_id, track_ids)
-Important:
-Uses /items endpoint.
-Automatically chunks in groups of 100.
-Expects raw track IDs (not URIs).
-Working implementation verified.
-7. Remove Tracks from Playlist
-Spotipy 2.25.2 has a DELETE body issue.
-Problem
-Spotipy sends DELETE payload using data= instead of proper JSON formatting.
-Spotify returns:
-400 Bad Request
-No uris provided
-Solution
-Manual request using requests.
-remove_tracks_from_playlist(sp, playlist_id, track_ids)
-Example:
-remove_tracks_from_playlist(sp, playlist_id, [track_id])
-Implementation:
-Retrieves OAuth token
-Sends DELETE to /items
-Uses json=payload
-Validates status code
-Confirmed working.
-8. Replace Playlist Tracks
-replace_playlist_tracks(sp, playlist_id, track_ids)
-Replaces entire playlist content.
-Example:
-replace_playlist_tracks(sp, playlist_id, new_track_ids)
-Uses:
-PUT /playlists/{playlist_id}/items
-Confirmed functional.
-9. Update Playlist Details
-update_playlist_details(sp, playlist_id, name=None, public=None)
-Example:
-update_playlist_details(sp, playlist_id, name="Eminem - 16")
-Uses:
-PUT /playlists/{playlist_id}
-Confirmed working.
-10. Unfollow / Delete Playlist
-unfollow_playlist(sp, playlist_id)
-Example:
-unfollow_playlist(sp, playlist_id)
-Uses:
-DELETE /playlists/{playlist_id}/followers
-Confirmed functional.
-11. Get Playlist Metadata
-Using:
-playlist_data = sp.playlist(playlist_id)
-Important structural note:
-In Spotipy 2.25.2:
-playlist_data["items"]["total"]
-NOT:
-playlist_data["tracks"]["total"]
-The tracks field is deprecated.
-Always inspect real response structure.
-12. Get Playlist Items
-Spotipy's playlist_items() internally calls deprecated /tracks.
-To ensure compatibility with Spotify API v1:
-Manual implementation using /items endpoint is recommended.
-Confirmed working implementation uses:
-GET /playlists/{playlist_id}/items
-via requests.
-Returned structure:
-{
-  "items": [
-      {
-          "item": { ... track object ... }
-      }
-  ],
-  "total": integer
-}
-Track name access:
-item["item"]["name"]
-13. Confirmed Working Operations
-Verified end-to-end:
-Initial DB sync
-Track filtering
-Playlist creation
-Batch add
-Remove single track
-Remove multiple tracks
-Rename playlist
-Replace content
-Unfollow playlist
-Retrieve playlist metadata
-Retrieve playlist items
-All validated in clean notebook environment.
-14. Known Limitations
-Spotipy 2.25.2 DELETE implementation issue.
-Deprecated /tracks endpoint used internally by Spotipy.
-Manual HTTP requests required for strict compliance with /items.
-15. Design Philosophy Maintained
-Notebook = laboratory
-core/ = production layer
-Tools are atomic
-No semantic logic inside tools
-SQLite = source of truth
-Spotify = ingestion source
-No over-engineering
-Clean separation of layers
-Agent layer not yet implemented
-16. Phase Status
-Playlist module: Stable
-Database layer: Stable
-Ingestion layer: Stable
-Phase 1 (Structural Layer): Functionally complete and validated.
-If you want, next step we can:
-Add a structured "Initialization Block Template" section for all future notebooks
-Or draft the closing section of Phase 1 formally and prepare transition to Phase 2
+. Overview
+Personal Music Architect is a modular music intelligence system designed to operate over a user's Spotify ecosystem.
+This is not a simple playlist bot.
+It is being built as a scalable, production-grade architecture intended to evolve into a multimodal intelligent music architect capable of:
+Structuring a personal music ecosystem.
+Designing optimized playlists.
+Analyzing engagement patterns.
+Operating under controlled autonomy.
+This document reflects the state of the project after closing Level 1 — Deterministic Execution Layer.
+2. Architectural Philosophy
+The project follows strict engineering principles:
+Infrastructure first.
+Clear separation of responsibilities.
+SQLite as the single source of truth.
+Spotify as execution layer only.
+LLM decides structure, backend executes.
+No premature complexity.
+Phased evolution.
+Deterministic layer separated from creative layer.
+No mixing execution and cognition.
+Level 1 is intentionally deterministic.
+It does not reason.
+It executes explicit, structured intentions.
+3. Current Architecture
+Level 0 — Infrastructure (Closed)
+Responsible for:
+Spotify API execution.
+SQLite persistence.
+Data ingestion and synchronization.
+Modules:
+database.py → SQLite connection and table creation.
+repository.py → Pure SQL data access layer.
+playlists.py → Spotify execution layer.
+ingestion.py → Sync saved tracks into SQLite.
+SQLite schema includes:
+tracks
+artists
+albums
+track_artists
+track_albums
+Spotify communication uses:
+Spotipy where stable.
+Direct API endpoints when necessary (e.g. /items instead of deprecated /tracks).
+Level 1 — Deterministic Executor (Closed)
+Responsible for:
+Executing structured user intentions.
+Enforcing single structural action per request.
+Validating input using Pydantic schemas.
+Preventing ambiguous multi-tool execution.
+Stack:
+LangChain
+ChatOpenAI
+@tool decorator
+Pydantic validation
+Deterministic guard logic
+4. Deterministic Design Rules
+Level 1 enforces:
+One user intention = one structural action.
+No chained tool execution.
+No implicit defaults.
+No interpretation of ambiguous requests.
+No cognitive reasoning.
+No multi-step orchestration.
+If a request contains multiple structural actions:
+The system returns:
+Ambiguous request. Multiple structural actions detected.
+Please specify a single clear intention.
+This is intentional.
+Creative reasoning belongs to a future layer.
+5. Implemented Tools (Level 1)
+All tools use strict Pydantic schemas.
+Creation
+create_artist_playlist
+create_recent_playlist
+create_album_playlist
+create_mixed_playlist
+Modification
+rename_playlist_by_name
+add_tracks_to_playlist_by_name
+remove_tracks_from_playlist_by_name
+All tools:
+Query via repository.py
+Execute via playlists.py
+Contain no raw SQL
+Contain no direct HTTP logic
+Do not mix responsibilities
+6. Execution Flow
+User Request
+↓
+LangChain Agent
+↓
+Schema Validation (Pydantic)
+↓
+Single Tool Selection
+↓
+Repository (data selection)
+↓
+Playlist Layer (Spotify execution)
+↓
+Structured Response
+No tool chaining is allowed.
+7. Testing Status
+The following have been validated:
+Playlist creation by artist
+Playlist creation by album
+Playlist creation by recency
+Mixed playlist creation
+Track addition
+Track removal
+Playlist rename
+Multi-intention blocking
+SQLite thread safety
+Spotify endpoint compatibility
+Level 1 is stable and production-ready within its deterministic scope.
+8. What This Layer Does NOT Do
+Level 1 does not:
+Perform reasoning.
+Detect ambiguities.
+Propose optimizations.
+Analyze engagement.
+Use embeddings.
+Use RAG.
+Perform similarity search.
+Execute multiple actions per request.
+Those belong to the next phase.
+9. Next Phase (Planned)
+Level 2 — Creative / Strategic Agent
+Will introduce:
+Intent interpretation.
+Context retrieval (RAG).
+Library analysis.
+Playlist optimization logic.
+Multi-step planning.
+Confirmation before structural changes.
+This layer will operate above the deterministic executor.
+10. Project Status
+Level 0: Closed
+Level 1: Closed
+Deterministic guard: Active
+Architecture: Stable
+Ready for Creative Layer design
