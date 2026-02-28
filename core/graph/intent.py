@@ -3,22 +3,27 @@ from core.graph.state import MusicState
 
 def intent_node(state: MusicState, llm) -> MusicState:
     """
-    Classify user intent into:
-    - build
-    - info
-    - unknown
+    Classifies user request into macro-intents:
+    build | modify | info | unknown
     """
+
+    # -----------------------------------------------------
+    # BYPASS: If intent already injected (e.g., confirmation flow)
+    # -----------------------------------------------------
+    if state.get("intent"):
+        return state
 
     user_input = state["user_input"]
 
     prompt = f"""
-    Classify the following user request into one of these categories:
+    Classify the following user request into EXACTLY one of these categories:
 
-    - "build" → if the user wants to create, modify, or generate a playlist.
-    - "info" → if the user is asking for information about their music library.
-    - "unknown" → if it does not fit clearly.
+    - "build"   → Creating a new playlist from scratch.
+    - "modify"  → Adding, deleting, renaming, or adapting an existing playlist.
+    - "info"    → Asking for information or statistics.
+    - "unknown" → If unclear.
 
-    Only return one word: build, info, or unknown.
+    Only return the word.
 
     User request:
     "{user_input}"
@@ -27,7 +32,9 @@ def intent_node(state: MusicState, llm) -> MusicState:
     response = llm.invoke(prompt)
     intent = response.content.strip().lower()
 
-    if intent not in ["build", "info"]:
+    valid_intents = ["build", "modify", "info"]
+
+    if intent not in valid_intents:
         intent = "unknown"
 
     state["intent"] = intent

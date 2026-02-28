@@ -1,144 +1,92 @@
-def build_strategic_playlist(conn, strategy: dict) -> list[str]:
+from typing import List, Dict
+
+
+def build_strategic_playlist(repo, strategy: Dict) -> List[str]:
     """
-    Build a strategic playlist based on structured strategy config.
-    Returns ordered list of track_ids.
+    Deterministic playlist builder for Fase 2 unified strategy contract.
+    Compatible with current Repository implementation.
     """
 
-    subsets = {}
+    goal = strategy.get("goal")
+    sources = strategy.get("sources", [])
+    constraints = strategy.get("constraints", {})
 
-    for subset_cfg in strategy.get("subsets", []):
-        subset_type = subset_cfg["type"]
+    all_tracks: List[str] = []
 
-        if subset_type == "album":
-            subsets["album"] = _get_album_subset(
-                conn,
-                album_name=subset_cfg["name"],
-                top_by=subset_cfg.get("top_by"),
-                limit=subset_cfg.get("limit")
+    # =====================================================
+    # RESOLVE SOURCES
+    # =====================================================
+
+    for source in sources:
+
+        source_type = source.get("type")
+        filters = source.get("filters", {}) or {}
+
+        limit = filters.get("limit")
+        timeframe = filters.get("timeframe")
+        name = filters.get("name")
+
+        tracks: List[str] = []
+
+        # -------------------------
+        # EXPLICIT (NEW)
+        # -------------------------
+        if source_type == "explicit":
+            tracks = filters.get("track_ids", []) or []
+
+        # -------------------------
+        # ARTIST
+        # -------------------------
+        elif source_type == "artist" and name:
+            tracks = repo.get_tracks_by_artist(name)
+
+        # -------------------------
+        # ALBUM
+        # -------------------------
+        elif source_type == "album" and name:
+            tracks = repo.get_tracks_by_album(name)
+
+        # -------------------------
+        # TOP PLAYED
+        # -------------------------
+        elif source_type == "top_played":
+            rows = repo.get_play_history_aggregated(decay_days=30.0)
+
+            sorted_rows = sorted(
+                rows,
+                key=lambda r: r[2],  # total_plays
+                reverse=True
             )
 
-        elif subset_type == "artist":
-            subsets["artist"] = _get_artist_subset(
-                conn,
-                artist_name=subset_cfg["name"]
-            )
+            tracks = [r[0] for r in sorted_rows]
 
-    ordered_tracks = _merge_with_priority(
-        subsets,
-        strategy.get("priority_order", [])
-    )
+        # -------------------------
+        # RECENTLY ADDED
+        # -------------------------
+        elif source_type == "recently_added":
+            tracks = repo.get_recent_tracks(limit=limit or 20)
 
-    final_tracks = _apply_global_limit(
-        ordered_tracks,
-        strategy.get("max_tracks")
-    )
+        # -------------------------
+        # Apply per-source limit
+        # -------------------------
+        if limit and isinstance(limit, int):
+            tracks = tracks[:limit]
 
-    return final_tracks
+        all_tracks.extend(tracks)
 
-def _get_album_subset(conn, album_name: str, top_by: str | None = None, limit: int | None = None) -> list[str]:
-    """
-    Retrieve tracks from album.
-    Supports ranking by:
-    - recency
-    - most_played
-    """
+    # =====================================================
+    # DEDUPLICATION
+    # =====================================================
 
-    cursor = conn.cursor()
+    if constraints.get("deduplicate", True):
+        all_tracks = list(dict.fromkeys(all_tracks))
 
-    if top_by == "recency":
-        cursor.execute("""
-        SELECT
-            ph.track_id,
-            SUM(
-                ph.weight *
-                EXP(
-                    - (julianday('now') - julianday(ph.played_at)) / 30.0
-                )
-            ) as score
-        FROM play_history ph
-        JOIN track_albums ta ON ta.track_id = ph.track_id
-        JOIN albums a ON a.album_id = ta.album_id
-        WHERE a.name = ?
-        GROUP BY ph.track_id
-        ORDER BY score DESC
-        """, (album_name,))
+    # =====================================================
+    # GLOBAL LIMIT
+    # =====================================================
 
-        rows = cursor.fetchall()
-        track_ids = [r[0] for r in rows]
+    max_tracks = constraints.get("max_tracks")
+    if max_tracks and isinstance(max_tracks, int):
+        all_tracks = all_tracks[:max_tracks]
 
-    elif top_by == "most_played":
-        cursor.execute("""
-        SELECT
-            ph.track_id,
-            COUNT(*) as play_count
-        FROM play_history ph
-        JOIN track_albums ta ON ta.track_id = ph.track_id
-        JOIN albums a ON a.album_id = ta.album_id
-        WHERE a.name = ?
-        GROUP BY ph.track_id
-        ORDER BY play_count DESC
-        """, (album_name,))
-
-        rows = cursor.fetchall()
-        track_ids = [r[0] for r in rows]
-
-    else:
-        cursor.execute("""
-        SELECT t.track_id
-        FROM tracks t
-        JOIN track_albums ta ON ta.track_id = t.track_id
-        JOIN albums a ON a.album_id = ta.album_id
-        WHERE a.name = ?
-        """, (album_name,))
-
-        rows = cursor.fetchall()
-        track_ids = [r[0] for r in rows]
-
-    if limit:
-        track_ids = track_ids[:limit]
-
-    return track_ids
-
-
-def _get_artist_subset(conn, artist_name: str) -> list[str]:
-    """
-    Retrieve all tracks from a given artist.
-    """
-
-    cursor = conn.cursor()
-
-    cursor.execute("""
-    SELECT DISTINCT t.track_id
-    FROM tracks t
-    JOIN track_artists ta ON ta.track_id = t.track_id
-    JOIN artists a ON a.artist_id = ta.artist_id
-    WHERE a.name = ?
-    """, (artist_name,))
-
-    return [r[0] for r in cursor.fetchall()]
-
-
-def _merge_with_priority(subsets: dict, priority_order: list[str]) -> list[str]:
-    """
-    Merge subsets following explicit priority order.
-    Deduplicate while preserving order.
-    """
-
-    merged = []
-
-    for key in priority_order:
-        if key in subsets:
-            merged.extend(subsets[key])
-
-    return list(dict.fromkeys(merged))
-
-
-def _apply_global_limit(track_ids: list[str], max_tracks: int | None) -> list[str]:
-    """
-    Apply global limit to final track list.
-    """
-
-    if max_tracks:
-        return track_ids[:max_tracks]
-
-    return track_ids
+    return all_tracks
