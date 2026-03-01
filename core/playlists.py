@@ -145,10 +145,10 @@ def get_playlist(sp, playlist_id: str):
 
 def get_playlist_items(sp, playlist_id: str, limit=100, offset=0):
     """
-    Retrieve playlist items.
+    Retrieve playlist items using the official /items endpoint.
     """
-    return sp.playlist_items(
-        playlist_id,
+    return sp._get(
+        f"playlists/{playlist_id}/items",
         limit=limit,
         offset=offset
     )

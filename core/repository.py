@@ -348,3 +348,31 @@ class Repository:
             VALUES (?, ?, ?)
         """, (playlist_id, track_id, position))
         self.commit()
+
+    def get_all_playlists(self) -> list[str]:
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT name
+            FROM playlists
+            ORDER BY name ASC
+        """)
+        return [r[0] for r in cursor.fetchall()]
+
+    def count_playlists(self) -> int:
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM playlists
+        """)
+        return cursor.fetchone()[0]
+
+    def count_artist_tracks_in_playlists(self, artist_name: str) -> int:
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT COUNT(DISTINCT pt.track_id)
+            FROM playlist_tracks pt
+            JOIN track_artists ta ON pt.track_id = ta.track_id
+            JOIN artists a ON ta.artist_id = a.artist_id
+            WHERE LOWER(a.name) = LOWER(?)
+        """, (artist_name,))
+        return cursor.fetchone()[0]

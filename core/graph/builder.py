@@ -1,17 +1,3 @@
-from langgraph.graph import StateGraph, END
-
-from core.graph.state import MusicState
-from core.graph.nodes import (
-    strategy_node,
-    validation_node,
-    composition_node,
-    confirmation_node,
-    execution_node,
-)
-from core.graph.intent import intent_node
-from core.graph.info_queries import info_query_node
-
-
 def build_music_graph(repo, sp, llm):
 
     graph = StateGraph(MusicState)
@@ -32,9 +18,6 @@ def build_music_graph(repo, sp, llm):
     def execution_wrapper(state):
         return execution_node(state, sp)
 
-    def info_wrapper(state):
-        return info_query_node(state, repo)
-
     # =====================================================
     # Nodes
     # =====================================================
@@ -43,9 +26,7 @@ def build_music_graph(repo, sp, llm):
     graph.add_node("strategy", strategy_wrapper)
     graph.add_node("validation", validation_node)
     graph.add_node("composition", composition_wrapper)
-    graph.add_node("confirmation", confirmation_node)
     graph.add_node("execution", execution_wrapper)
-    graph.add_node("info", info_wrapper)
 
     # =====================================================
     # Entry Point
@@ -63,16 +44,10 @@ def build_music_graph(repo, sp, llm):
         {
             "build": "strategy",
             "modify": "strategy",
-            "info": "info",
+            "info": "strategy",
             "unknown": END,
         },
     )
-
-    # =====================================================
-    # Info Flow
-    # =====================================================
-
-    graph.add_edge("info", END)
 
     # =====================================================
     # Strategy → Validation
@@ -90,28 +65,22 @@ def build_music_graph(repo, sp, llm):
     )
 
     # =====================================================
-    # Composition → Confirmation
+    # Composition → Execution (direct, no confirmation)
     # =====================================================
 
     graph.add_conditional_edges(
         "composition",
-        lambda state: "clarify" if state["needs_clarification"] else "confirm",
+        lambda state: (
+            "end"
+            if state.get("strategy", {}).get("goal") == "info"
+            else "clarify"
+            if state["needs_clarification"]
+            else "execute"
+        ),
         {
+            "end": END,
             "clarify": END,
-            "confirm": "confirmation",
-        },
-    )
-
-    # =====================================================
-    # Confirmation → Execution
-    # =====================================================
-
-    graph.add_conditional_edges(
-        "confirmation",
-        lambda state: "execute" if state.get("confirmed") else "stop",
-        {
             "execute": "execution",
-            "stop": END,
         },
     )
 

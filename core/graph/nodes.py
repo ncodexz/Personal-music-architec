@@ -20,8 +20,9 @@ from core.playlists import (
 
 def strategy_node(state: MusicState, llm) -> MusicState:
     """
-    Use the LLM to translate user input into the unified Fase 2 strategy contract.
+    Use the LLM to translate user input into the unified strategy contract.
     """
+
     # If strategy already injected (e.g., explicit from session layer), skip LLM
     if state.get("strategy"):
         return state
@@ -32,7 +33,11 @@ def strategy_node(state: MusicState, llm) -> MusicState:
     prompt = f"""
     Translate the following user request into a valid JSON strategy object.
 
-    The strategy must follow this structure:
+    The strategy must follow ONE of these structures:
+
+    -------------------------------------------------------
+    BUILD OR MODIFY STRUCTURE
+    -------------------------------------------------------
 
     {{
         "goal": "build" | "modify",
@@ -48,7 +53,8 @@ def strategy_node(state: MusicState, llm) -> MusicState:
                 "filters": {{
                     "timeframe": string or null,
                     "limit": int or null,
-                    "name": string or null
+                    "name": string or null,
+                    "track_ids": list or null
                 }}
             }}
         ],
@@ -65,13 +71,30 @@ def strategy_node(state: MusicState, llm) -> MusicState:
         }}
     }}
 
-    Rules:
-    - If the intent is "{intent}", the goal must match it.
+    -------------------------------------------------------
+    INFO STRUCTURE
+    -------------------------------------------------------
+
+    {{
+        "goal": "info",
+        "info_type": "list_playlists" | "count_playlists" | "artist_in_playlists" | "artist_in_library",
+        "parameters": {{
+            "artist_name": string or null,
+            "timeframe": string or null
+        }}
+    }}
+
+    -------------------------------------------------------
+    RULES
+    -------------------------------------------------------
+
+    - The goal MUST match the detected intent: "{intent}".
+    - If user provides a playlist name, you MUST use it in target.identifier exactly as written.
+    - Never invent playlist names.
+    - Never generate default names.
     - If goal is "build", at least one source is required.
     - If goal is "modify", target.identifier is required.
-    - If action is "add" or "delete", sources are required.
-    - If source.type is "explicit", filters must include "track_ids": list of strings.
-    - If action is "rename", parameters must include "new_name".
+    - If goal is "info", info_type is required.
     - Use null where values are not provided.
     - Always return valid JSON.
     - Do NOT include explanations.
@@ -85,7 +108,6 @@ def strategy_node(state: MusicState, llm) -> MusicState:
     response = llm.invoke(prompt)
     raw_output = response.content.strip()
 
-    # Extract JSON block even if extra text is included
     json_match = re.search(r"\{.*\}", raw_output, re.DOTALL)
 
     if json_match:
@@ -130,7 +152,7 @@ def validation_node(state: MusicState) -> MusicState:
 
 def composition_node(state: MusicState, repo) -> MusicState:
     """
-    Execute deterministic logic for build or modify goals.
+    Execute deterministic logic for build, modify or info goals.
     """
 
     strategy = state.get("strategy")
@@ -138,9 +160,98 @@ def composition_node(state: MusicState, repo) -> MusicState:
     if not strategy:
         state["needs_clarification"] = True
         state["clarification_message"] = "Invalid strategy."
+        state["error"] = None
         return state
 
     goal = strategy.get("goal")
+
+    # =====================================================
+    # INFO
+    # =====================================================
+
+    if goal == "info":
+
+        info_type = strategy.get("info_type")
+        parameters = strategy.get("parameters", {}) or {}
+
+        # -------------------------
+        # LIST PLAYLISTS
+        # -------------------------
+        if info_type == "list_playlists":
+
+            names = repo.get_all_playlists()
+
+            if not names:
+                message = "You do not have any playlists."
+            else:
+                message = "Your playlists are:\n- " + "\n- ".join(names)
+
+            state["clarification_message"] = message
+            state["needs_clarification"] = False
+            return state
+
+        # -------------------------
+        # COUNT PLAYLISTS
+        # -------------------------
+        if info_type == "count_playlists":
+
+            count = repo.count_playlists()
+
+            state["clarification_message"] = (
+                f"You have {count} playlists."
+            )
+            state["needs_clarification"] = False
+            return state
+
+        # -------------------------
+        # ARTIST IN LIBRARY
+        # -------------------------
+        if info_type == "artist_in_library":
+
+            artist_name = parameters.get("artist_name")
+
+            if not artist_name:
+                state["needs_clarification"] = True
+                state["clarification_message"] = "Please specify the artist name."
+                return state
+
+            count = repo.count_tracks_by_artist(artist_name)
+
+            if count == 0:
+                message = f"You do not have any tracks by {artist_name} in your library."
+            else:
+                message = f"You have {count} tracks by {artist_name} in your library."
+
+            state["clarification_message"] = message
+            state["needs_clarification"] = False
+            return state
+
+        # -------------------------
+        # ARTIST IN PLAYLISTS
+        # -------------------------
+        if info_type == "artist_in_playlists":
+
+            artist_name = parameters.get("artist_name")
+
+            if not artist_name:
+                state["needs_clarification"] = True
+                state["clarification_message"] = "Please specify the artist name."
+                return state
+
+            count = repo.count_artist_tracks_in_playlists(artist_name)
+
+            if count == 0:
+                message = f"You do not have any tracks by {artist_name} in your playlists."
+            else:
+                message = f"You have {count} tracks by {artist_name} across your playlists."
+
+            state["clarification_message"] = message
+            state["needs_clarification"] = False
+            return state
+
+        state["needs_clarification"] = True
+        state["clarification_message"] = "Unsupported informational request."
+        return state
 
     # =====================================================
     # BUILD
@@ -152,7 +263,7 @@ def composition_node(state: MusicState, repo) -> MusicState:
 
         state["result_tracks"] = result_tracks
         state["needs_clarification"] = False
-
+        state["error"] = None
         return state
 
     # =====================================================
@@ -171,7 +282,7 @@ def composition_node(state: MusicState, repo) -> MusicState:
             state["result_tracks"] = None
 
         state["needs_clarification"] = False
-
+        state["error"] = None
         return state
 
     # =====================================================
@@ -180,6 +291,7 @@ def composition_node(state: MusicState, repo) -> MusicState:
 
     state["needs_clarification"] = True
     state["clarification_message"] = "Unsupported goal."
+    state["error"] = None
     return state
 
 # -------------------------
@@ -268,8 +380,8 @@ from core.playlists import (
 
 def execution_node(state: MusicState, sp) -> MusicState:
     """
-    Execute build or modify actions after confirmation.
-    Fully aligned with playlists.py helpers.
+    Execute build or modify actions.
+    Execution is direct when strategy is valid and clear.
     """
 
     strategy = state.get("strategy")
@@ -277,6 +389,7 @@ def execution_node(state: MusicState, sp) -> MusicState:
 
     if not strategy:
         state["error"] = "No valid strategy found."
+        state["needs_clarification"] = False
         return state
 
     # =====================================================
@@ -289,6 +402,7 @@ def execution_node(state: MusicState, sp) -> MusicState:
 
         if not tracks:
             state["error"] = "No tracks available for playlist creation."
+            state["needs_clarification"] = False
             return state
 
         target = strategy.get("target", {})
@@ -301,7 +415,7 @@ def execution_node(state: MusicState, sp) -> MusicState:
             f"Playlist '{playlist_name}' created successfully."
         )
         state["needs_clarification"] = False
-
+        state["error"] = None
         return state
 
     # =====================================================
@@ -317,12 +431,14 @@ def execution_node(state: MusicState, sp) -> MusicState:
 
         if not playlist_name:
             state["error"] = "Playlist name is required for modification."
+            state["needs_clarification"] = False
             return state
 
         playlist_id = get_playlist_id_by_name(sp, playlist_name)
 
         if not playlist_id:
             state["error"] = f"Playlist '{playlist_name}' not found."
+            state["needs_clarification"] = False
             return state
 
         # -------------------------
@@ -334,6 +450,13 @@ def execution_node(state: MusicState, sp) -> MusicState:
 
             if not new_name:
                 state["error"] = "New name not provided."
+                state["needs_clarification"] = False
+                return state
+
+            if new_name == playlist_name:
+                state["clarification_message"] = "The playlist already has that name."
+                state["needs_clarification"] = False
+                state["error"] = None
                 return state
 
             update_playlist_details(sp, playlist_id, name=new_name)
@@ -341,6 +464,9 @@ def execution_node(state: MusicState, sp) -> MusicState:
             state["clarification_message"] = (
                 f"Playlist renamed to '{new_name}'."
             )
+            state["needs_clarification"] = False
+            state["error"] = None
+            return state
 
         # -------------------------
         # ADD
@@ -352,6 +478,7 @@ def execution_node(state: MusicState, sp) -> MusicState:
 
             if not tracks:
                 state["error"] = "No tracks available to add."
+                state["needs_clarification"] = False
                 return state
 
             add_tracks_to_playlist(sp, playlist_id, tracks)
@@ -359,6 +486,9 @@ def execution_node(state: MusicState, sp) -> MusicState:
             state["clarification_message"] = (
                 f"{len(tracks)} tracks added to '{playlist_name}'."
             )
+            state["needs_clarification"] = False
+            state["error"] = None
+            return state
 
         # -------------------------
         # DELETE
@@ -370,6 +500,7 @@ def execution_node(state: MusicState, sp) -> MusicState:
 
             if not tracks:
                 state["error"] = "No tracks available to remove."
+                state["needs_clarification"] = False
                 return state
 
             remove_tracks_from_playlist(sp, playlist_id, tracks)
@@ -377,23 +508,28 @@ def execution_node(state: MusicState, sp) -> MusicState:
             state["clarification_message"] = (
                 f"{len(tracks)} tracks removed from '{playlist_name}'."
             )
+            state["needs_clarification"] = False
+            state["error"] = None
+            return state
 
         # -------------------------
         # ADAPT
         # -------------------------
 
         elif action == "adapt":
-            # Placeholder for future adaptation logic
+
             state["clarification_message"] = (
                 f"Playlist '{playlist_name}' adapted successfully."
             )
+            state["needs_clarification"] = False
+            state["error"] = None
+            return state
 
         else:
             state["error"] = "Unsupported modification action."
+            state["needs_clarification"] = False
             return state
 
-        state["needs_clarification"] = False
-        return state
-
     state["error"] = "Unsupported goal."
+    state["needs_clarification"] = False
     return state

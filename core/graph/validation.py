@@ -3,8 +3,7 @@ from typing import Tuple, Optional
 
 def validate_strategy(strategy: Optional[dict]) -> Tuple[bool, Optional[str]]:
     """
-    Validate the generated strategy structure for Fase 2 unified contract.
-
+    Validate the generated strategy structure for unified contract.
     Returns:
         (is_valid, clarification_message)
     """
@@ -14,8 +13,21 @@ def validate_strategy(strategy: Optional[dict]) -> Tuple[bool, Optional[str]]:
 
     goal = strategy.get("goal")
 
-    if goal not in ["build", "modify"]:
+    if goal not in ["build", "modify", "info"]:
         return False, "Invalid goal. Please specify a valid action."
+
+    # =====================================================
+    # INFO VALIDATION
+    # =====================================================
+
+    if goal == "info":
+
+        info_type = strategy.get("info_type")
+
+        if not info_type:
+            return False, "Please specify what information you would like."
+
+        return True, None
 
     target = strategy.get("target", {})
     sources = strategy.get("sources", [])
@@ -39,32 +51,9 @@ def validate_strategy(strategy: Optional[dict]) -> Tuple[bool, Optional[str]]:
                 "album",
                 "top_played",
                 "recently_added",
-                "explicit",  # NEW
+                "explicit",
             ]:
                 return False, f"Unsupported source type '{source_type}'."
-
-            filters = source.get("filters", {}) or {}
-
-            # -------------------------
-            # EXPLICIT VALIDATION
-            # -------------------------
-            if source_type == "explicit":
-                track_ids = filters.get("track_ids")
-                if not isinstance(track_ids, list) or len(track_ids) == 0:
-                    return False, "Explicit source requires a non-empty list of track_ids."
-
-            # -------------------------
-            # LIMIT VALIDATION
-            # -------------------------
-            limit = filters.get("limit")
-            if limit is not None:
-                if not isinstance(limit, int) or limit <= 0:
-                    return False, "Source limit must be a positive integer."
-
-        max_tracks = constraints.get("max_tracks")
-        if max_tracks is not None:
-            if not isinstance(max_tracks, int) or max_tracks <= 0:
-                return False, "The maximum number of tracks must be a positive integer."
 
         return True, None
 
@@ -85,18 +74,6 @@ def validate_strategy(strategy: Optional[dict]) -> Tuple[bool, Optional[str]]:
 
         if action not in ["add", "delete", "rename", "adapt"]:
             return False, "Unsupported modification action."
-
-        # If action requires sources
-        if action in ["add", "delete"]:
-            if not isinstance(sources, list) or len(sources) == 0:
-                return False, f"To {action} tracks, I need at least one source."
-
-        # Rename validation
-        if action == "rename":
-            parameters = modification.get("parameters", {})
-            new_name = parameters.get("new_name")
-            if not new_name or not isinstance(new_name, str):
-                return False, "Please provide a valid new name for the playlist."
 
         return True, None
 
