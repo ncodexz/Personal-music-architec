@@ -2,7 +2,7 @@ from core.graph.state import MusicState
 from core.graph.execution.handler import execute_build, execute_modify
 
 
-def execution_node(state: MusicState, sp) -> MusicState:
+def execution_node(state: MusicState, sp, repo) -> MusicState:
     """
     Graph execution node.
     Delegates real execution logic to execution handlers.
@@ -20,7 +20,7 @@ def execution_node(state: MusicState, sp) -> MusicState:
         return execute_build(state, sp)
 
     if goal == "modify":
-        return execute_modify(state, sp)
+        return execute_modify(state, sp, repo)
 
     state["error"] = "Unsupported goal."
     state["needs_clarification"] = False

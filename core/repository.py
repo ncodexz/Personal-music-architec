@@ -376,3 +376,20 @@ class Repository:
             WHERE LOWER(a.name) = LOWER(?)
         """, (artist_name,))
         return cursor.fetchone()[0]
+    
+    def delete_playlist(self, playlist_id: str):
+        cursor = self.conn.cursor()
+
+        # Remove tracks linked to playlist
+        cursor.execute(
+            "DELETE FROM playlist_tracks WHERE playlist_id = ?",
+            (playlist_id,)
+        )
+
+        # Remove playlist itself
+        cursor.execute(
+            "DELETE FROM playlists WHERE playlist_id = ?",
+            (playlist_id,)
+        )
+
+        self.commit()

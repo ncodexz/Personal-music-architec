@@ -1,3 +1,4 @@
+
 from core.playlists import (
     create_playlist,
     add_tracks_to_playlist,
@@ -33,7 +34,7 @@ def execute_build(state, sp):
     return state
 
 
-def execute_modify(state, sp):
+def execute_modify(state, sp, repo):
     strategy = state.get("strategy")
     modification = strategy.get("modification", {})
     action = modification.get("action")
@@ -94,12 +95,16 @@ def execute_modify(state, sp):
 
         sp.current_user_unfollow_playlist(playlist_id)
 
+        # Remove from local database
+        repo.delete_playlist(playlist_id)
+
         state["clarification_message"] = (
             f"Playlist '{playlist_name}' deleted successfully."
         )
-        state["created_playlist_name"] = None
         state["needs_clarification"] = False
         state["error"] = None
+        state["deleted_playlist"] = playlist_name
+
         return state
 
     if action == "rename":

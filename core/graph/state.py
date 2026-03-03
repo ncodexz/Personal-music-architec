@@ -38,3 +38,6 @@ class MusicState(TypedDict):
     
     # Last validated strategy
     last_strategy: Optional[dict]
+    
+ # Deleted playlist name (for memory cleanup)
+    deleted_playlist: Optional[str]   

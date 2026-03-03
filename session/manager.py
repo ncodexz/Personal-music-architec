@@ -90,23 +90,33 @@ class SessionManager:
         intent = state.get("intent")
         result_tracks = state.get("result_tracks")
         strategy = state.get("strategy")
-        print("DEBUG strategy in update_context:", strategy)
-        
+        needs_clarification = state.get("needs_clarification")
+
         if intent == "unknown":
             self.context.reset()
             return
 
-        if result_tracks:
+        # Store result tracks only if execution happened successfully
+        if result_tracks and not needs_clarification:
             self.context.last_result_tracks = result_tracks
 
-        if strategy:
+        # Store strategy only if it passed validation
+        if strategy and not needs_clarification:
             self.context.last_strategy = strategy
 
-        if "created_playlist_name" in state:
-            self.context.last_playlist_name = state.get("created_playlist_name")
+        # Update playlist name only if a new one was actually created
+        created = state.get("created_playlist_name")
+        if created:
+            self.context.last_playlist_name = created
+        
+        #clear playlist name if it was deleted
+        deleted = state.get("deleted_playlist")
+        if deleted and deleted == self.context.last_playlist_name:
+            self.context.last_playlist_name = None
 
         self.context.last_intent = intent
         self.context.phase = SessionPhase.ACTIVE
+
 
     def _check_timeout(self):
         if datetime.utcnow() - self.context.last_interaction_ts > self.timeout:

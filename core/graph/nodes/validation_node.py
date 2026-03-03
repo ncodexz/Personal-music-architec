@@ -8,7 +8,7 @@ def validation_node(state: MusicState) -> MusicState:
     """
 
     strategy = state.get("strategy")
-    print("DEBUG last_strategy in validation:", state.get("last_strategy"))
+
     if not strategy:
         state["needs_clarification"] = True
         state["clarification_message"] = "Invalid strategy."
@@ -28,6 +28,27 @@ def validation_node(state: MusicState) -> MusicState:
             strategy["target"]["identifier"] = state["last_playlist_name"]
 
     # -------------------------------------------------
+    # RENAME FIX (LLM misinterpretation correction)
+    # -------------------------------------------------
+
+    if goal == "modify":
+        modification = strategy.get("modification", {})
+        action = modification.get("action")
+
+        if action == "rename":
+            target = strategy.get("target", {})
+            identifier = target.get("identifier")
+            new_name = modification.get("parameters", {}).get("new_name")
+
+            if (
+                identifier
+                and new_name
+                and identifier == new_name
+                and state.get("last_playlist_name")
+            ):
+                strategy["target"]["identifier"] = state["last_playlist_name"]
+
+    # -------------------------------------------------
     # SOURCE INHERITANCE FOR ADD
     # -------------------------------------------------
 
@@ -39,7 +60,6 @@ def validation_node(state: MusicState) -> MusicState:
 
             sources = strategy.get("sources", [])
 
-            # If user did not specify sources explicitly
             if not sources:
 
                 last_strategy = state.get("last_strategy")
@@ -53,10 +73,7 @@ def validation_node(state: MusicState) -> MusicState:
 
                 last_goal = last_strategy.get("goal")
 
-                # -----------------------------------------
-                # Case 1: last strategy had explicit sources
-                # -----------------------------------------
-
+                # Case 1: inherit from build/modify with single source
                 if last_goal in ["build", "modify"]:
                     last_sources = last_strategy.get("sources", [])
 
@@ -65,7 +82,6 @@ def validation_node(state: MusicState) -> MusicState:
                         inherited_source = last_sources[0].copy()
                         inherited_filters = inherited_source.get("filters", {}).copy()
 
-                        # Reset limit to avoid inheriting previous quantity
                         inherited_filters["limit"] = None
                         inherited_source["filters"] = inherited_filters
 
@@ -78,10 +94,7 @@ def validation_node(state: MusicState) -> MusicState:
                         )
                         return state
 
-                # -----------------------------------------
-                # Case 2: last strategy was info about artist
-                # -----------------------------------------
-
+                # Case 2: inherit from info about artist
                 elif last_goal == "info":
 
                     info_type = last_strategy.get("info_type")
@@ -119,6 +132,35 @@ def validation_node(state: MusicState) -> MusicState:
                         "Please specify which songs or artist you would like to add."
                     )
                     return state
+
+    # -------------------------------------------------
+    # STRICT DELETE LOGIC
+    # -------------------------------------------------
+
+    if goal == "modify":
+        modification = strategy.get("modification", {})
+        action = modification.get("action")
+
+        if action == "delete_tracks":
+
+            parameters = modification.get("parameters", {}) or {}
+            delete_all = parameters.get("delete_all", False)
+            sources = strategy.get("sources", [])
+
+            if delete_all and not sources:
+                state["needs_clarification"] = True
+                state["clarification_message"] = (
+                    "To delete all matching tracks, a valid source must be specified."
+                )
+                return state
+
+            if not delete_all and not sources:
+                state["needs_clarification"] = True
+                state["clarification_message"] = (
+                    "To delete specific tracks, you must explicitly specify the exact songs."
+                )
+                return state
+
     # -------------------------------------------------
     # ENSURE PLAYLIST EXISTS FOR MODIFY
     # -------------------------------------------------
@@ -133,7 +175,7 @@ def validation_node(state: MusicState) -> MusicState:
                 "Please specify which playlist you would like to modify."
             )
             return state
-        
+
     # -------------------------------------------------
     # FINAL STRUCTURAL VALIDATION
     # -------------------------------------------------

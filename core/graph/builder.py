@@ -21,7 +21,7 @@ def build_music_graph(repo, sp, llm):
         return composition_node(state, repo)
 
     def execution_wrapper(state):
-        return execution_node(state, sp)
+        return execution_node(state, sp, repo)
 
     # =====================================================
     # Nodes
