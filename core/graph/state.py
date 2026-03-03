@@ -29,3 +29,12 @@ class MusicState(TypedDict):
     
     # Classified intent
     intent: str
+    
+    # Conversational memory injection
+    last_playlist_name: Optional[str]
+
+    # Needed for session memory
+    created_playlist_name: Optional[str]
+    
+    # Last validated strategy
+    last_strategy: Optional[dict]

@@ -1,3 +1,11 @@
+from langgraph.graph import StateGraph, END
+from core.graph.nodes.strategy_node import strategy_node
+from core.graph.nodes.validation_node import validation_node
+from core.graph.nodes.composition_node import composition_node
+from core.graph.nodes.execution_node import execution_node
+from core.graph.state import MusicState
+
+
 def build_music_graph(repo, sp, llm):
 
     graph = StateGraph(MusicState)
@@ -5,9 +13,6 @@ def build_music_graph(repo, sp, llm):
     # =====================================================
     # Dependency Wrappers
     # =====================================================
-
-    def intent_wrapper(state):
-        return intent_node(state, llm)
 
     def strategy_wrapper(state):
         return strategy_node(state, llm)
@@ -21,8 +26,7 @@ def build_music_graph(repo, sp, llm):
     # =====================================================
     # Nodes
     # =====================================================
-
-    graph.add_node("intent", intent_wrapper)
+    
     graph.add_node("strategy", strategy_wrapper)
     graph.add_node("validation", validation_node)
     graph.add_node("composition", composition_wrapper)
@@ -32,22 +36,8 @@ def build_music_graph(repo, sp, llm):
     # Entry Point
     # =====================================================
 
-    graph.set_entry_point("intent")
+    graph.set_entry_point("strategy")
 
-    # =====================================================
-    # Intent Routing
-    # =====================================================
-
-    graph.add_conditional_edges(
-        "intent",
-        lambda state: state["intent"],
-        {
-            "build": "strategy",
-            "modify": "strategy",
-            "info": "strategy",
-            "unknown": END,
-        },
-    )
 
     # =====================================================
     # Strategy → Validation

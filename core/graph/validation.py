@@ -72,8 +72,47 @@ def validate_strategy(strategy: Optional[dict]) -> Tuple[bool, Optional[str]]:
 
         action = modification.get("action")
 
-        if action not in ["add", "delete", "rename", "adapt"]:
+        if action not in ["add", "delete_tracks", "delete_playlist", "rename", "adapt"]:
             return False, "Unsupported modification action."
+
+        # -------------------------------------------------
+        # STRICT DELETE VALIDATION
+        # -------------------------------------------------
+
+        if action == "delete_tracks":
+
+            parameters = modification.get("parameters", {})
+            delete_all = parameters.get("delete_all")
+
+            if delete_all is None:
+                return False, "Delete operation must explicitly specify whether all matching tracks should be removed."
+
+            # Case 1: delete_all == True → must have at least one source
+            if delete_all is True:
+                if not isinstance(sources, list) or len(sources) == 0:
+                    return False, "To delete all matching tracks, a valid source must be specified."
+                return True, None
+
+            # Case 2: delete_all == False → must have explicit track_ids
+            if delete_all is False:
+
+                if not isinstance(sources, list) or len(sources) == 0:
+                    return False, "You must specify exact tracks to delete."
+
+                has_explicit_tracks = False
+
+                for source in sources:
+                    filters = source.get("filters", {})
+                    track_ids = filters.get("track_ids")
+
+                    if isinstance(track_ids, list) and len(track_ids) > 0:
+                        has_explicit_tracks = True
+                        break
+
+                if not has_explicit_tracks:
+                    return False, "To delete specific tracks, you must explicitly specify the exact songs."
+
+                return True, None
 
         return True, None
 
