@@ -93,6 +93,14 @@ class Repository:
         """, (artist_name,))
         return cursor.fetchone()[0]
     
+    def count_tracks(self) -> int:
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM tracks
+        """)
+        return cursor.fetchone()[0]
+    
     def get_track_name(self, track_id: str) -> str | None:
         cursor = self.conn.cursor()
         cursor.execute("""
@@ -102,6 +110,77 @@ class Repository:
         """, (track_id,))
         row = cursor.fetchone()
         return row[0] if row else None
+    
+    def get_all_tracks_with_artists(self):
+        cursor = self.conn.cursor()
+
+        cursor.execute("""
+            SELECT
+                t.track_id,
+                t.name,
+                a.name
+            FROM tracks t
+            JOIN track_artists ta ON t.track_id = ta.track_id
+            JOIN artists a ON ta.artist_id = a.artist_id
+            ORDER BY t.track_id;
+        """)
+
+        rows = cursor.fetchall()
+
+        tracks = {}
+
+        for track_id, track_name, artist_name in rows:
+            if track_id not in tracks:
+                tracks[track_id] = {
+                    "track_id": track_id,
+                    "name": track_name,
+                    "artists": []
+                }
+
+            tracks[track_id]["artists"].append(artist_name)
+
+        return list(tracks.values())
+    
+    def get_tracks_with_artists(self, track_ids: list[str]):
+
+        if not track_ids:
+            return []
+
+        placeholders = ",".join(["?"] * len(track_ids))
+
+        cursor = self.conn.cursor()
+
+        query = f"""
+            SELECT
+                t.track_id,
+                t.name,
+                a.name
+            FROM tracks t
+            JOIN track_artists ta ON t.track_id = ta.track_id
+            JOIN artists a ON ta.artist_id = a.artist_id
+            WHERE t.track_id IN ({placeholders})
+            ORDER BY t.track_id;
+        """
+
+        cursor.execute(query, track_ids)
+
+        rows = cursor.fetchall()
+
+        tracks = {}
+
+        for track_id, track_name, artist_name in rows:
+
+            if track_id not in tracks:
+                tracks[track_id] = {
+                    "track_id": track_id,
+                    "name": track_name,
+                    "artists": []
+                }
+
+            tracks[track_id]["artists"].append(artist_name)
+
+        return list(tracks.values())
+    
     # =====================================================
     # BEHAVIOR (Play History)
     # =====================================================
@@ -392,4 +471,114 @@ class Repository:
             (playlist_id,)
         )
 
+        self.commit()
+        
+    # =====================================================
+    # SEMANTIC (Emotional Anchors)
+    # =====================================================
+
+    def get_anchor_by_name(self, name: str):
+
+        cursor = self.conn.cursor()
+
+        cursor.execute("""
+            SELECT anchor_id, name, created_at, updated_at
+            FROM emotional_anchors
+        """)
+
+        rows = cursor.fetchall()
+
+        for row in rows:
+            if row[1].lower() == name.lower():
+                return {
+                    "anchor_id": row[0],
+                    "name": row[1],
+                    "created_at": row[2],
+                    "updated_at": row[3]
+                }
+
+        return None
+
+    def create_anchor(self, anchor_id: str, name: str, created_at: str, updated_at: str):
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT INTO emotional_anchors (anchor_id, name, created_at, updated_at)
+            VALUES (?, ?, ?, ?);
+        """, (anchor_id, name, created_at, updated_at))
+        self.commit()
+
+    def delete_anchor(self, anchor_id: str):
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            DELETE FROM emotional_anchors
+            WHERE anchor_id = ?;
+        """, (anchor_id,))
+        self.commit()
+
+    def add_track_to_anchor(self, anchor_id: str, track_id: str):
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT INTO emotional_anchor_tracks (anchor_id, track_id)
+            VALUES (?, ?);
+        """, (anchor_id, track_id))
+        self.commit()
+
+    def get_anchor_tracks(self, anchor_id: str) -> list[str]:
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT track_id
+            FROM emotional_anchor_tracks
+            WHERE anchor_id = ?;
+        """, (anchor_id,))
+        return [r[0] for r in cursor.fetchall()]
+
+    def get_anchor_name(self, anchor_id: str) -> str | None:
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT name
+            FROM emotional_anchors
+            WHERE anchor_id = ?;
+        """, (anchor_id,))
+        row = cursor.fetchone()
+        return row[0] if row else None
+    
+    def get_all_anchors(self):
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT anchor_id, name
+            FROM emotional_anchors;
+        """)
+        rows = cursor.fetchall()
+        
+        return [
+            {
+                "anchor_id": row[0],
+                "name": row[1]
+            }
+            for row in rows
+        ]
+    
+# =====================================================
+# SYSTEM STATE
+# =====================================================
+
+    def get_last_sync(self):
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT last_sync_at
+            FROM system_state
+            WHERE id = 1;
+        """)
+        row = cursor.fetchone()
+        return row[0] if row else None
+
+
+    def set_last_sync(self, timestamp: str):
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT INTO system_state (id, last_sync_at)
+            VALUES (1, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                last_sync_at = excluded.last_sync_at;
+        """, (timestamp,))
         self.commit()

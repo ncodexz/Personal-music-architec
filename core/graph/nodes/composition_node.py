@@ -2,7 +2,7 @@ from core.graph.state import MusicState
 from core.composition import build_strategic_playlist
 
 
-def composition_node(state: MusicState, repo) -> MusicState:
+def composition_node(state: MusicState, repo, semantic_service) -> MusicState:
     """
     Deterministic resolution of tracks.
     """
@@ -43,6 +43,17 @@ def composition_node(state: MusicState, repo) -> MusicState:
             state["clarification_message"] = f"You have {count} playlists."
             state["needs_clarification"] = False
             return state
+        
+        if info_type == "count_tracks":
+
+            count = repo.count_tracks()
+
+            state["clarification_message"] = (
+                f"You have {count} songs in your library."
+            )
+
+            state["needs_clarification"] = False
+            return state
 
         if info_type == "artist_in_library":
             artist_name = parameters.get("artist_name")
@@ -74,7 +85,7 @@ def composition_node(state: MusicState, repo) -> MusicState:
 
     if goal == "build":
 
-        result_tracks = build_strategic_playlist(repo, strategy)
+        result_tracks = build_strategic_playlist(repo, semantic_service, strategy)
 
         state["result_tracks"] = result_tracks
         state["needs_clarification"] = False
@@ -91,7 +102,7 @@ def composition_node(state: MusicState, repo) -> MusicState:
         action = modification.get("action")
 
         if action in ["add", "delete_tracks"]:
-            result_tracks = build_strategic_playlist(repo, strategy)
+            result_tracks = build_strategic_playlist(repo, semantic_service, strategy)
             state["result_tracks"] = result_tracks
         else:
             state["result_tracks"] = None

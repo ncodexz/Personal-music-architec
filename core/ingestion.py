@@ -1,36 +1,26 @@
-def fetch_all_saved_tracks(sp):
+# core/ingestion.py
+
+from core.semantic.anchors import convert_playlist_to_anchor
+from core.database import get_latest_added_at
+
+
+# =====================================================
+# TRACK SYNC
+# =====================================================
+
+def sync_new_tracks(sp, repo):
     """
-    Fetch all saved tracks from Spotify using pagination.
+    Synchronize new saved tracks from Spotify into SQLite.
+    Only inserts tracks added after latest stored added_at.
     """
-    all_tracks = []
-    limit = 50
-    offset = 0
 
-    while True:
-        results = sp.current_user_saved_tracks(limit=limit, offset=offset)
-        items = results["items"]
-
-        if not items:
-            break
-
-        all_tracks.extend(items)
-        offset += limit
-
-    return all_tracks
-
-
-def sync_new_tracks(sp, conn, get_latest_added_at_func):
-    """
-    Synchronize new tracks from Spotify into the local database.
-    Only inserts tracks added after the latest stored added_at.
-    """
-    latest_added_at = get_latest_added_at_func(conn)
-
-    cursor = conn.cursor()
+    latest_added_at = get_latest_added_at(repo.conn)
+    cursor = repo.conn.cursor()
 
     limit = 50
     offset = 0
     new_tracks_count = 0
+    new_tracks_ids = []
 
     while True:
         results = sp.current_user_saved_tracks(limit=limit, offset=offset)
@@ -50,73 +40,59 @@ def sync_new_tracks(sp, conn, get_latest_added_at_func):
                 break
 
             track_id = track["id"]
-            name = track["name"]
-            duration_ms = track["duration_ms"]
-            popularity = track.get("popularity")
+            new_tracks_ids.append(track_id)
 
-            # Insert Track
-          
             cursor.execute("""
-            INSERT OR IGNORE INTO tracks (track_id, name, added_at, duration_ms, popularity)
-            VALUES (?, ?, ?, ?, ?);
+                INSERT OR IGNORE INTO tracks
+                (track_id, name, added_at, duration_ms, popularity)
+                VALUES (?, ?, ?, ?, ?);
             """, (
                 track_id,
-                name,
+                track["name"],
                 added_at,
-                duration_ms,
-                popularity
+                track["duration_ms"],
+                track.get("popularity")
             ))
 
-           
-            # Insert Artists + Relation
-           
+            # Artists
             for artist in track["artists"]:
-                artist_id = artist["id"]
-                artist_name = artist["name"]
-
                 cursor.execute("""
-                INSERT OR IGNORE INTO artists (artist_id, name)
-                VALUES (?, ?);
+                    INSERT OR IGNORE INTO artists (artist_id, name)
+                    VALUES (?, ?);
                 """, (
-                    artist_id,
-                    artist_name
+                    artist["id"],
+                    artist["name"]
                 ))
 
                 cursor.execute("""
-                INSERT OR IGNORE INTO track_artists (track_id, artist_id)
-                VALUES (?, ?);
+                    INSERT OR IGNORE INTO track_artists (track_id, artist_id)
+                    VALUES (?, ?);
                 """, (
                     track_id,
-                    artist_id
+                    artist["id"]
                 ))
 
-        
-            # Insert Album + Relation 
-            
+            # Album
             album = track["album"]
-            album_id = album["id"]
-            album_name = album["name"]
-            release_date = album.get("release_date")
-            total_tracks = album.get("total_tracks")
-            album_type = album.get("album_type")
 
             cursor.execute("""
-            INSERT OR IGNORE INTO albums (album_id, name, release_date, total_tracks, album_type)
-            VALUES (?, ?, ?, ?, ?);
+                INSERT OR IGNORE INTO albums
+                (album_id, name, release_date, total_tracks, album_type)
+                VALUES (?, ?, ?, ?, ?);
             """, (
-                album_id,
-                album_name,
-                release_date,
-                total_tracks,
-                album_type
+                album["id"],
+                album["name"],
+                album.get("release_date"),
+                album.get("total_tracks"),
+                album.get("album_type")
             ))
 
             cursor.execute("""
-            INSERT OR IGNORE INTO track_albums (track_id, album_id)
-            VALUES (?, ?);
+                INSERT OR IGNORE INTO track_albums (track_id, album_id)
+                VALUES (?, ?);
             """, (
                 track_id,
-                album_id
+                album["id"]
             ))
 
             new_tracks_count += 1
@@ -126,21 +102,28 @@ def sync_new_tracks(sp, conn, get_latest_added_at_func):
 
         offset += limit
 
-    conn.commit()
+    repo.commit()
 
-    return new_tracks_count
+    return {
+        "new_tracks_count": new_tracks_count,
+        "new_tracks_ids": new_tracks_ids
+    }
 
-def sync_playlists(sp, conn):
+
+# =====================================================
+# PLAYLIST SYNC
+# =====================================================
+
+def sync_playlists(sp, repo):
     """
-    Synchronize playlists owned by the current user into the local database.
-    Uses the official /items endpoint (Spotify current contract).
-    Only tracks that exist in the local library are inserted.
+    Synchronize user-owned playlists.
+    Only tracks existing in library are inserted.
+    Handles ANCHOR_ playlists.
     """
 
     from core.playlists import get_playlist_items
 
-    cursor = conn.cursor()
-
+    cursor = repo.conn.cursor()
     current_user_id = sp.current_user()["id"]
 
     limit = 50
@@ -148,6 +131,7 @@ def sync_playlists(sp, conn):
 
     total_playlists_synced = 0
     total_playlist_tracks_synced = 0
+    anchors_updated = []
 
     while True:
         playlists = sp.current_user_playlists(limit=limit, offset=offset)
@@ -158,20 +142,43 @@ def sync_playlists(sp, conn):
 
         for playlist in items:
 
-            # Only sync playlists owned by the current user
             if playlist["owner"]["id"] != current_user_id:
                 continue
 
             playlist_id = playlist["id"]
             name = playlist.get("name")
-            description = playlist.get("description")
-            owner_id = playlist["owner"]["id"]
-            is_collaborative = int(playlist.get("collaborative", False))
-            is_public = int(playlist.get("public", False))
-            total_tracks = playlist.get("tracks", {}).get("total")
-            snapshot_id = playlist.get("snapshot_id")
 
-            # Insert or replace playlist metadata
+            # ==========================
+            # ANCHOR DETECTION
+            # ==========================
+
+            if name and name.startswith("ANCHOR_"):
+
+                anchor_id = convert_playlist_to_anchor(
+                    repo,
+                    playlist_id,
+                    name
+                )
+
+                if anchor_id:
+
+                    anchors_updated.append(anchor_id)
+
+                    sp.current_user_unfollow_playlist(playlist_id)
+
+                    cursor.execute(
+                        "DELETE FROM playlists WHERE playlist_id = ?;",
+                        (playlist_id,)
+                    )
+
+                    repo.commit()
+
+                continue
+
+            # ==========================
+            # NORMAL PLAYLIST SYNC
+            # ==========================
+
             cursor.execute("""
                 INSERT OR REPLACE INTO playlists (
                     playlist_id,
@@ -188,23 +195,21 @@ def sync_playlists(sp, conn):
             """, (
                 playlist_id,
                 name,
-                description,
-                owner_id,
-                is_collaborative,
-                is_public,
-                total_tracks,
-                snapshot_id
+                playlist.get("description"),
+                playlist["owner"]["id"],
+                int(playlist.get("collaborative", False)),
+                int(playlist.get("public", False)),
+                playlist.get("tracks", {}).get("total"),
+                playlist.get("snapshot_id")
             ))
 
             total_playlists_synced += 1
 
-            # Clean previous snapshot
-            cursor.execute("""
-                DELETE FROM playlist_tracks
-                WHERE playlist_id = ?;
-            """, (playlist_id,))
+            cursor.execute(
+                "DELETE FROM playlist_tracks WHERE playlist_id = ?;",
+                (playlist_id,)
+            )
 
-            # Fetch playlist items
             track_offset = 0
             track_limit = 100
             position = 0
@@ -217,12 +222,12 @@ def sync_playlists(sp, conn):
                     offset=track_offset
                 )
 
-                tracks_batch = result.get("items", [])
+                batch = result.get("items", [])
 
-                if not tracks_batch:
+                if not batch:
                     break
 
-                for entry in tracks_batch:
+                for entry in batch:
 
                     content = entry.get("item")
 
@@ -233,31 +238,27 @@ def sync_playlists(sp, conn):
                         continue
 
                     track_id = content.get("id")
-                    added_at = entry.get("added_at")
 
                     if not track_id:
                         continue
 
-                    #  IMPORTANT: Only include tracks that exist in library
+                    # Only include tracks already in library
                     cursor.execute(
                         "SELECT 1 FROM tracks WHERE track_id = ?;",
                         (track_id,)
                     )
+
                     if not cursor.fetchone():
                         continue
 
                     cursor.execute("""
-                        INSERT OR IGNORE INTO playlist_tracks (
-                            playlist_id,
-                            track_id,
-                            added_at,
-                            position
-                        )
+                        INSERT OR IGNORE INTO playlist_tracks
+                        (playlist_id, track_id, added_at, position)
                         VALUES (?, ?, ?, ?);
                     """, (
                         playlist_id,
                         track_id,
-                        added_at,
+                        entry.get("added_at"),
                         position
                     ))
 
@@ -268,9 +269,10 @@ def sync_playlists(sp, conn):
 
         offset += limit
 
-    conn.commit()
+    repo.commit()
 
     return {
         "playlists_synced": total_playlists_synced,
-        "playlist_tracks_synced": total_playlist_tracks_synced
+        "playlist_tracks_synced": total_playlist_tracks_synced,
+        "anchors_updated": anchors_updated
     }

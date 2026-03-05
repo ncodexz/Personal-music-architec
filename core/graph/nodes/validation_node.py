@@ -75,9 +75,13 @@ def validation_node(state: MusicState) -> MusicState:
 
                 # Case 1: inherit from build/modify with single source
                 if last_goal in ["build", "modify"]:
-                    last_sources = last_strategy.get("sources", [])
+                    last_sources = (last_strategy or {}).get("sources", [])
 
-                    if isinstance(last_sources, list) and len(last_sources) == 1:
+                    if (
+                        isinstance(last_sources, list)
+                        and len(last_sources) == 1
+                        and last_sources[0].get("type") in ["artist", "album", "semantic_anchor"]
+                    ):
 
                         inherited_source = last_sources[0].copy()
                         inherited_filters = inherited_source.get("filters", {}).copy()
@@ -92,6 +96,7 @@ def validation_node(state: MusicState) -> MusicState:
                         state["clarification_message"] = (
                             "Please specify which songs or artist you would like to add."
                         )
+                        
                         return state
 
                 # Case 2: inherit from info about artist

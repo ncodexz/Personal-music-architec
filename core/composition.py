@@ -1,7 +1,7 @@
 from typing import List, Dict
 
 
-def build_strategic_playlist(repo, strategy: Dict) -> List[str]:
+def build_strategic_playlist(repo, semantic_service,  strategy: Dict) -> List[str]:
     """
     Deterministic playlist builder for Fase 2 unified strategy contract.
     Compatible with current Repository implementation.
@@ -54,7 +54,7 @@ def build_strategic_playlist(repo, strategy: Dict) -> List[str]:
 
             sorted_rows = sorted(
                 rows,
-                key=lambda r: r[2],  # total_plays
+                key=lambda r: r[1],  # recency_score
                 reverse=True
             )
 
@@ -67,13 +67,55 @@ def build_strategic_playlist(repo, strategy: Dict) -> List[str]:
             tracks = repo.get_recent_tracks(limit=limit or 20)
 
         # -------------------------
+        # SEMANTIC ANCHOR
+        # -------------------------
+        elif source_type == "semantic_anchor":
+
+            anchor_name = filters.get("anchor_name")
+
+            if anchor_name:
+
+                anchor = repo.get_anchor_by_name(anchor_name)
+
+                # --------------------------------
+                # CASE 1: Anchor exists
+                # --------------------------------
+                if anchor:
+
+                    anchor_id = anchor["anchor_id"]
+
+                    results = semantic_service.search_similar_to_anchor(
+                        anchor_id=anchor_id,
+                        top_k=limit or 50
+                    )
+
+                    tracks = [r["track_id"] for r in results]
+
+                # --------------------------------
+                # CASE 2: Anchor does not exist
+                # --------------------------------
+                else:
+                    results = semantic_service.search_by_text(
+                        anchor_name,
+                        top_k=limit or 50
+                    )
+
+                    tracks = [r["track_id"] for r in results]
+
+        # -------------------------
         # Apply per-source limit
         # -------------------------
         if limit and isinstance(limit, int):
             tracks = tracks[:limit]
 
         all_tracks.extend(tracks)
+    # =====================================================
+    # GLOBAL MIX
+    # =====================================================
 
+    import random
+    random.shuffle(all_tracks)
+    
     # =====================================================
     # DEDUPLICATION
     # =====================================================

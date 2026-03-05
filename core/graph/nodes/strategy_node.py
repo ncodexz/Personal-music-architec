@@ -34,7 +34,7 @@ def strategy_node(state: MusicState, llm) -> MusicState:
 
         "sources": [
             {{
-                "type": "artist" | "album" | "top_played" | "recently_added" | "explicit",
+                "type": "artist" | "album" | "top_played" | "recently_added" | "explicit", | "semantic_anchor"
                 "filters": {{
                     "timeframe": string or null,
                     "limit": int or null,
@@ -62,7 +62,7 @@ def strategy_node(state: MusicState, llm) -> MusicState:
 
     {{
         "goal": "info",
-        "info_type": "list_playlists" | "count_playlists" | "artist_in_playlists" | "artist_in_library",
+        "info_type": "list_playlists" | "count_playlists" | "count_tracks" | "artist_in_playlists" | "artist_in_library",
         "parameters": {{
             "artist_name": string or null,
             "timeframe": string or null
@@ -119,7 +119,35 @@ def strategy_node(state: MusicState, llm) -> MusicState:
 
     - Do NOT use filters.limit to represent the requested number of songs.
       filters.limit should only be used when the limit is part of the source definition itself.
-      
+    
+    -------------------------------------------------------
+    SEMANTIC ANCHOR SOURCE
+    -------------------------------------------------------
+
+    A source can be of type "semantic_anchor".
+
+    This source represents a semantic search around an anchor
+    already stored in the system.
+
+    Structure:
+
+    {{
+        "type": "semantic_anchor",
+        "filters": {{
+            "anchor_name": string,
+            "limit": int or null
+        }}
+    }}
+
+    Rules:
+
+    - semantic_anchor can be used with both "build" and "modify" goals.
+    - When used with goal "modify", the modification.action will normally be "add" or "adapt".
+    - anchor_name should match the concept requested by the user.
+    - If the user asks for songs similar to a concept, mood, or vibe
+    (examples: chill, sad, focus, workout, ambient), you should use semantic_anchor.
+    - anchor_name MUST correspond to an existing anchor.
+    
     User request:
     "{user_input}"
     """

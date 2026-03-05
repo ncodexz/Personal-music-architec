@@ -1,19 +1,28 @@
 from datetime import datetime, timedelta
-
+from core.ingestion import sync_new_tracks, sync_playlists
+from core.database import get_latest_added_at
 from session.context import SessionContext, SessionPhase
 from core.graph.state import MusicState
 
 
 class SessionManager:
 
-    def __init__(self, graph, llm, timeout_seconds: int = 60):
+    def __init__(self, graph, llm, repo, sp, semantic_service, timeout_seconds: int = 60):
         self.graph = graph
         self.llm = llm
+        self.repo = repo
+        self.sp = sp
         self.context = SessionContext()
+        self.semantic_service = semantic_service
         self.timeout = timedelta(seconds=timeout_seconds)
+        self.sync_cooldown_seconds = 300  # 5 minutes
+
+    # =====================================================
+    # PUBLIC ENTRY
+    # =====================================================
 
     def handle(self, user_input: str) -> MusicState:
-
+        self._maybe_sync()
         self._check_timeout()
         self.context.update_timestamp()
 
@@ -27,7 +36,7 @@ class SessionManager:
                 or
                 (self.context.root_intent == "info" and intent == "modify")
             )
-    ):
+        ):
             self.context.reset()
 
         if not self.context.root_intent:
@@ -41,34 +50,98 @@ class SessionManager:
 
         return result_state
 
-    def _detect_intent(self, user_input: str) -> str:
+    # =====================================================
+    # SYNC CONTROL
+    # =====================================================
+    def _maybe_sync(self):
+        now = datetime.utcnow()
 
-        normalized = user_input.strip().lower()
+        last_sync_str = self.repo.get_last_sync()
 
-        if normalized.startswith(("add", "delete", "remove", "rename", "adapt")):
-            return "modify"
+        # First time ever → force sync
+        if not last_sync_str:
+            self._run_sync(now)
+            return
 
-        prompt = f"""
-        Classify the following user request into EXACTLY one of these categories:
+        last_sync = datetime.fromisoformat(last_sync_str)
+        elapsed = (now - last_sync).total_seconds()
 
-        - "build"
-        - "modify"
-        - "info"
-        - "unknown"
+        if elapsed > self.sync_cooldown_seconds:
+            self._run_sync(now)
 
-        Only return the word.
+    def _run_sync(self, now):
 
-        User request:
-        "{user_input}"
-        """
+        print("Checking for updates...")
 
-        response = self.llm.invoke(prompt)
-        intent = response.content.strip().lower()
+        # =============================
+        # TRACK SYNC
+        # =============================
 
-        if intent not in ["build", "modify", "info"]:
-            return "unknown"
+        new_tracks = sync_new_tracks(
+            self.sp,
+            self.repo
+        )
 
-        return intent
+        new_tracks_count = new_tracks["new_tracks_count"]
+        new_tracks_ids = new_tracks["new_tracks_ids"]
+
+        # =============================
+        # PLAYLIST SYNC
+        # =============================
+
+        playlist_result = sync_playlists(
+            self.sp,
+            self.repo
+        )
+
+        playlist_tracks_synced = playlist_result["playlist_tracks_synced"]
+        anchors_updated = playlist_result["anchors_updated"]
+
+        # =============================
+        # DATABASE CHANGE CHECK
+        # =============================
+
+        if new_tracks_count > 0 or playlist_tracks_synced > 0:
+
+            print("Changes detected. Database synchronized.")
+
+            # =============================
+            # SEMANTIC LAYER UPDATE
+            # =============================
+
+            print("Updating semantic index...")
+
+            # --- Incremental track indexing
+            if new_tracks_ids:
+
+                indexed = self.semantic_service.index_tracks(
+                    new_tracks_ids
+                )
+
+                print(f"Indexed {indexed} new tracks.")
+
+            # --- Anchor recalculation
+            for anchor_id in anchors_updated:
+
+                self.semantic_service.recalculate_anchor(
+                    anchor_id
+                                                        
+                )
+
+        else:
+
+            print("No changes detected.")
+
+        # =============================
+        # UPDATE SYNC STATE
+        # =============================
+
+        self.repo.set_last_sync(now.isoformat())
+    
+
+    # =====================================================
+    # STATE BUILDING
+    # =====================================================
 
     def _build_default_state(self, user_input: str, intent: str) -> MusicState:
         return {
@@ -85,8 +158,11 @@ class SessionManager:
             "created_playlist_name": None,
         }
 
-    def _update_context(self, state: MusicState):
+    # =====================================================
+    # CONTEXT UPDATE
+    # =====================================================
 
+    def _update_context(self, state: MusicState):
         intent = state.get("intent")
         result_tracks = state.get("result_tracks")
         strategy = state.get("strategy")
@@ -96,20 +172,16 @@ class SessionManager:
             self.context.reset()
             return
 
-        # Store result tracks only if execution happened successfully
         if result_tracks and not needs_clarification:
             self.context.last_result_tracks = result_tracks
 
-        # Store strategy only if it passed validation
         if strategy and not needs_clarification:
             self.context.last_strategy = strategy
 
-        # Update playlist name only if a new one was actually created
         created = state.get("created_playlist_name")
         if created:
             self.context.last_playlist_name = created
-        
-        #clear playlist name if it was deleted
+
         deleted = state.get("deleted_playlist")
         if deleted and deleted == self.context.last_playlist_name:
             self.context.last_playlist_name = None
@@ -117,7 +189,46 @@ class SessionManager:
         self.context.last_intent = intent
         self.context.phase = SessionPhase.ACTIVE
 
+    # =====================================================
+    # TIMEOUT CONTROL
+    # =====================================================
 
     def _check_timeout(self):
         if datetime.utcnow() - self.context.last_interaction_ts > self.timeout:
             self.context.reset()
+    
+    
+    def _detect_intent(self, user_input: str) -> str:
+
+        text = user_input.lower()
+
+        # BUILD
+        if any(word in text for word in [
+            "create",
+            "build",
+            "make",
+            "generate",
+            "new playlist"
+        ]):
+            return "build"
+
+        # MODIFY
+        if any(word in text for word in [
+            "add",
+            "remove",
+            "delete",
+            "rename",
+            "update"
+        ]):
+            return "modify"
+
+        # INFO
+        if any(word in text for word in [
+            "how many",
+            "list",
+            "show",
+            "do i have"
+        ]):
+            return "info"
+
+        return "unknown"

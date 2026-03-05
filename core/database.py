@@ -155,6 +155,34 @@ def create_tables(conn):
         FOREIGN KEY (track_id) REFERENCES tracks(track_id) ON DELETE CASCADE
     );
     """)
+    #Semantic Domain
+    
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS emotional_anchors (
+        anchor_id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS emotional_anchor_tracks (
+        anchor_id TEXT NOT NULL,
+        track_id TEXT NOT NULL,
+        PRIMARY KEY (anchor_id, track_id),
+        FOREIGN KEY (anchor_id) REFERENCES emotional_anchors(anchor_id) ON DELETE CASCADE,
+        FOREIGN KEY (track_id) REFERENCES tracks(track_id) ON DELETE CASCADE
+    );
+    """)
+    
+    # System state (sync control)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS system_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        last_sync_at TEXT
+    );
+    """)
 
     # Indexes
 

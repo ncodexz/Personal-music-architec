@@ -52,6 +52,7 @@ def validate_strategy(strategy: Optional[dict]) -> Tuple[bool, Optional[str]]:
                 "top_played",
                 "recently_added",
                 "explicit",
+                "semantic_anchor",
             ]:
                 return False, f"Unsupported source type '{source_type}'."
 

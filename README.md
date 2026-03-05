@@ -1,141 +1,258 @@
-. Overview
-Personal Music Architect is a modular music intelligence system designed to operate over a user's Spotify ecosystem.
-This is not a simple playlist bot.
-It is being built as a scalable, production-grade architecture intended to evolve into a multimodal intelligent music architect capable of:
-Structuring a personal music ecosystem.
-Designing optimized playlists.
-Analyzing engagement patterns.
-Operating under controlled autonomy.
-This document reflects the state of the project after closing Level 1 — Deterministic Execution Layer.
-2. Architectural Philosophy
-The project follows strict engineering principles:
-Infrastructure first.
-Clear separation of responsibilities.
-SQLite as the single source of truth.
-Spotify as execution layer only.
-LLM decides structure, backend executes.
-No premature complexity.
-Phased evolution.
-Deterministic layer separated from creative layer.
-No mixing execution and cognition.
-Level 1 is intentionally deterministic.
-It does not reason.
-It executes explicit, structured intentions.
-3. Current Architecture
-Level 0 — Infrastructure (Closed)
-Responsible for:
-Spotify API execution.
-SQLite persistence.
-Data ingestion and synchronization.
-Modules:
-database.py → SQLite connection and table creation.
-repository.py → Pure SQL data access layer.
-playlists.py → Spotify execution layer.
-ingestion.py → Sync saved tracks into SQLite.
-SQLite schema includes:
-tracks
-artists
-albums
-track_artists
-track_albums
-Spotify communication uses:
-Spotipy where stable.
-Direct API endpoints when necessary (e.g. /items instead of deprecated /tracks).
-Level 1 — Deterministic Executor (Closed)
-Responsible for:
-Executing structured user intentions.
-Enforcing single structural action per request.
-Validating input using Pydantic schemas.
-Preventing ambiguous multi-tool execution.
-Stack:
-LangChain
-ChatOpenAI
-@tool decorator
-Pydantic validation
-Deterministic guard logic
-4. Deterministic Design Rules
-Level 1 enforces:
-One user intention = one structural action.
-No chained tool execution.
-No implicit defaults.
-No interpretation of ambiguous requests.
-No cognitive reasoning.
-No multi-step orchestration.
-If a request contains multiple structural actions:
-The system returns:
-Ambiguous request. Multiple structural actions detected.
-Please specify a single clear intention.
-This is intentional.
-Creative reasoning belongs to a future layer.
-5. Implemented Tools (Level 1)
-All tools use strict Pydantic schemas.
-Creation
-create_artist_playlist
-create_recent_playlist
-create_album_playlist
-create_mixed_playlist
-Modification
-rename_playlist_by_name
-add_tracks_to_playlist_by_name
-remove_tracks_from_playlist_by_name
-All tools:
-Query via repository.py
-Execute via playlists.py
-Contain no raw SQL
-Contain no direct HTTP logic
-Do not mix responsibilities
-6. Execution Flow
-User Request
-↓
-LangChain Agent
-↓
-Schema Validation (Pydantic)
-↓
-Single Tool Selection
-↓
-Repository (data selection)
-↓
-Playlist Layer (Spotify execution)
-↓
-Structured Response
-No tool chaining is allowed.
-7. Testing Status
-The following have been validated:
-Playlist creation by artist
-Playlist creation by album
-Playlist creation by recency
-Mixed playlist creation
-Track addition
-Track removal
-Playlist rename
-Multi-intention blocking
-SQLite thread safety
-Spotify endpoint compatibility
-Level 1 is stable and production-ready within its deterministic scope.
-8. What This Layer Does NOT Do
-Level 1 does not:
-Perform reasoning.
-Detect ambiguities.
-Propose optimizations.
-Analyze engagement.
-Use embeddings.
-Use RAG.
-Perform similarity search.
-Execute multiple actions per request.
-Those belong to the next phase.
-9. Next Phase (Planned)
-Level 2 — Creative / Strategic Agent
-Will introduce:
-Intent interpretation.
-Context retrieval (RAG).
-Library analysis.
-Playlist optimization logic.
-Multi-step planning.
-Confirmation before structural changes.
-This layer will operate above the deterministic executor.
-10. Project Status
-Level 0: Closed
-Level 1: Closed
-Deterministic guard: Active
-Architecture: Stable
-Ready for Creative Layer design
+# Personal Music Architect
+
+Personal Music Architect is an intelligent music management agent that connects to your Spotify library and allows you to create, modify, and analyze playlists using natural language.
+
+The system combines deterministic playlist building with semantic retrieval using vector embeddings to generate playlists based on artists, listening behavior, and emotional context.
+
+---
+
+## Overview
+
+The agent interacts with your personal Spotify library and supports requests such as:
+
+* Creating playlists from specific artists or albums
+* Generating playlists based on moods or emotions
+* Modifying existing playlists
+* Querying information about your music library
+
+Example commands:
+
+```
+Create a playlist with songs by Drake
+Create a sad playlist
+Create a nostalgic playlist
+How many songs do I have in my library?
+List my playlists
+Add more songs to my playlist
+Delete playlist AI Generated Playlist
+```
+
+---
+
+## Architecture
+
+The system is composed of several layers:
+
+```
+User Input
+     ↓
+Session Manager
+     ↓
+LangGraph Agent
+     ↓
+Strategy → Validation → Composition → Execution
+     ↓
+Spotify API + Semantic Engine
+```
+
+Core components:
+
+* **Session Layer**
+  Handles conversation context and session memory.
+
+* **Graph Agent (LangGraph)**
+  Executes the workflow for interpreting and fulfilling user requests.
+
+* **Deterministic Composition Engine**
+  Builds playlists based on explicit sources such as artists, albums, or listening history.
+
+* **Semantic Engine (RAG)**
+  Uses embeddings and vector search to find musically related tracks.
+
+* **Spotify Integration**
+  Executes playlist creation and modification via the Spotify API.
+
+---
+
+## Semantic Recommendation Engine
+
+The system supports hybrid semantic retrieval.
+
+### Emotional Anchors
+
+Anchors represent curated emotional concepts created from playlists.
+
+Example:
+
+```
+ANCHOR_SAD
+ANCHOR_HIGH CHILL
+ANCHOR_POWERFULL
+```
+
+Each anchor is converted into a centroid vector in Pinecone.
+
+When a user asks for:
+
+```
+Create a sad playlist
+```
+
+the system retrieves tracks similar to the anchor vector.
+
+---
+
+### Semantic Fallback
+
+If a requested emotion does not have a predefined anchor, the system performs direct semantic search.
+
+Example:
+
+```
+Create a nostalgic playlist
+```
+
+Pipeline:
+
+```
+emotion text
+      ↓
+text embedding
+      ↓
+vector similarity search
+      ↓
+tracks from your library
+```
+
+This allows the system to generate playlists for **any mood or concept**.
+
+---
+
+## Technology Stack
+
+* Python
+* SQLite
+* LangGraph
+* OpenAI Embeddings
+* Pinecone Vector Database
+* Spotify Web API (Spotipy)
+* LangChain
+
+---
+
+## Project Structure
+
+```
+.
+├── core
+│   ├── graph
+│   ├── semantic
+│   ├── ingestion.py
+│   ├── playlists.py
+│   ├── repository.py
+│   └── database.py
+│
+├── session
+│   ├── manager.py
+│   └── context.py
+│
+├── notebooks
+│   └── testing notebooks
+│
+├── main.py
+├── music_agent.db
+└── README.md
+```
+
+---
+
+## Installation
+
+Clone the repository:
+
+```
+git clone <repository-url>
+cd personal-music-architect
+```
+
+Create a virtual environment:
+
+```
+python -m venv venv
+source venv/bin/activate
+```
+
+Install dependencies:
+
+```
+pip install -r requirements.txt
+```
+
+---
+
+## Environment Variables
+
+Create a `.env` file:
+
+```
+OPENAI_API_KEY=your_openai_key
+PINECONE_API_KEY=your_pinecone_key
+SPOTIPY_CLIENT_ID=your_spotify_client_id
+SPOTIPY_CLIENT_SECRET=your_spotify_client_secret
+SPOTIPY_REDIRECT_URI=http://localhost:8888/callback
+```
+
+---
+
+## Running the Agent
+
+Start the system with:
+
+```
+python main.py
+```
+
+You will see:
+
+```
+System ready.
+Type 'exit' to quit.
+```
+
+Then interact with the agent directly.
+
+---
+
+## Example Usage
+
+Create a playlist from an artist:
+
+```
+Create a playlist with songs by Drake
+```
+
+Create a mood-based playlist:
+
+```
+Create a sad playlist
+```
+
+Create a playlist from a new emotion:
+
+```
+Create a nostalgic playlist
+```
+
+Query library information:
+
+```
+How many songs do I have in my library?
+```
+
+---
+
+## Future Improvements
+
+Potential extensions for the system:
+
+* automatic anchor generation
+* behavioral recommendation integration
+* playlist evolution based on listening patterns
+* anchor discovery through clustering
+* improved conversational reasoning
+
+---
+
+## License
+
+MIT License
