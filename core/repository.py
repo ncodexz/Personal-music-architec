@@ -437,6 +437,14 @@ class Repository:
         """)
         return [r[0] for r in cursor.fetchall()]
 
+    def get_all_playlist_ids(self) -> list[str]:
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT playlist_id
+            FROM playlists
+        """)
+        return [r[0] for r in cursor.fetchall()]
+    
     def count_playlists(self) -> int:
         cursor = self.conn.cursor()
         cursor.execute("""

@@ -60,7 +60,8 @@ def init_system():
                 "playlist-modify-private "
                 "playlist-modify-public "
                 "playlist-read-private "
-                "user-read-recently-played"
+                "user-read-recently-played "
+                "user-library-read"
             )
         )
     )

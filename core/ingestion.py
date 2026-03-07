@@ -276,3 +276,28 @@ def sync_playlists(sp, repo):
         "playlist_tracks_synced": total_playlist_tracks_synced,
         "anchors_updated": anchors_updated
     }
+
+def sync_deleted_playlists(sp, repo):
+
+    spotify_ids = set()
+
+    results = sp.current_user_playlists(limit=50)
+
+    while results:
+
+        for p in results["items"]:
+            spotify_ids.add(p["id"])
+
+        if results["next"]:
+            results = sp.next(results)
+        else:
+            results = None
+
+    db_ids = set(repo.get_all_playlist_ids())
+
+    deleted_ids = db_ids - spotify_ids
+
+    for playlist_id in deleted_ids:
+        repo.delete_playlist(playlist_id)
+
+    return len(deleted_ids)

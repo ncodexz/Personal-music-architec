@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from core.ingestion import sync_new_tracks, sync_playlists
+from core.ingestion import sync_new_tracks, sync_playlists, sync_deleted_playlists
 from core.database import get_latest_added_at
 from session.context import SessionContext, SessionPhase
 from core.graph.state import MusicState
@@ -93,6 +93,11 @@ class SessionManager:
             self.sp,
             self.repo
         )
+        
+        deleted_playlists = sync_deleted_playlists(
+            self.sp,
+            self.repo
+        )
 
         playlist_tracks_synced = playlist_result["playlist_tracks_synced"]
         anchors_updated = playlist_result["anchors_updated"]
@@ -101,7 +106,7 @@ class SessionManager:
         # DATABASE CHANGE CHECK
         # =============================
 
-        if new_tracks_count > 0 or playlist_tracks_synced > 0:
+        if new_tracks_count > 0 or playlist_tracks_synced > 0 or deleted_playlists >0:
 
             print("Changes detected. Database synchronized.")
 
