@@ -18,6 +18,9 @@ def build_strategic_playlist(repo, semantic_service,  strategy: Dict) -> List[st
     # =====================================================
 
     for source in sources:
+        
+        if not source or not isinstance(source,dict):
+            continue
 
         source_type = source.get("type")
         filters = source.get("filters", {}) or {}
